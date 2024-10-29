@@ -1,41 +1,66 @@
-// gps.c
-#include <stdio.h>
-#include "driver/uart.h"
-#include "esp_log.h"
-#include "mqtt_client.h"
 #include "gps.h"
-#include "mqtt.h" // Az MQTT kliens miatt
+#include "mqtt.h"
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+#include "esp_log.h"
 
-#define RXD2 (16)
-#define TXD2 (17)
+// Föld sugara (méterben)
+#define EARTH_RADIUS 6371000.0
+
+// Kezdőpont koordinátái, amelyhez viszonyítunk (pl. egy referencia GPS pont)
+#define REF_LAT 47.4979  // Példa Budapest középpontjára
+#define REF_LON 19.0402
+
+// Koordináta-struktúra definiálása
+typedef struct {
+    float x;
+    float y;
+    float z;
+} Coordinates;
 
 static const char *TAG = "GPS";
 
-// A GPS UART inicializálása
-void gps_init(void) {
-    const uart_config_t uart_config = {
-        .baud_rate = 9600,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
-    };
-    uart_param_config(UART_NUM_2, &uart_config);
-    uart_set_pin(UART_NUM_2, TXD2, RXD2, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    uart_driver_install(UART_NUM_2, 1024 * 2, 0, 0, NULL, 0);
+// GPS adat átalakítása X, Y, Z koordinátákra
+Coordinates gps_to_xyz(float latitude, float longitude, float altitude) {
+    float lat_rad = latitude * M_PI / 180.0;
+    float lon_rad = longitude * M_PI / 180.0;
+    float ref_lat_rad = REF_LAT * M_PI / 180.0;
+    float ref_lon_rad = REF_LON * M_PI / 180.0;
+
+    float delta_lat = lat_rad - ref_lat_rad;
+    float delta_lon = lon_rad - ref_lon_rad;
+
+    Coordinates coords;
+    coords.x = EARTH_RADIUS * delta_lon * cos(ref_lat_rad);
+    coords.y = EARTH_RADIUS * delta_lat;
+    coords.z = altitude;
+
+    return coords;
 }
 
-// Funkció, amely a GPS adatokat beolvassa és publikálja az MQTT-n
-void gps_read_and_publish(void) {
-    uint8_t data[128];
-    int len = uart_read_bytes(UART_NUM_2, data, sizeof(data) - 1, 20 / portTICK_RATE_MS);
-    if (len > 0) {
-        data[len] = '\0'; // Null-terminálás
-        ESP_LOGI(TAG, "GPS Data: %s", data);
+void gps_read_and_publish() {
+    if (Serial2.available()) {
+        char gps_data[100];
+        int len = Serial2.readBytesUntil('\n', gps_data, sizeof(gps_data) - 1);
+        gps_data[len] = '\0';
 
-        // Ellenőrzi, hogy $GPGGA üzenetet kapott-e, és publikálja, ha igen
-        if (strstr((char*)data, "$GPGGA")) {
-            esp_mqtt_client_publish(mqtt_client, "gps/data", (const char*)data, 0, 1, 0);
+        // Parselés ($GPGGA formátum keresése)
+        if (strstr(gps_data, "$GPGGA") != NULL) {
+            // Példa értékek (valós GPS parsolás szükséges)
+            float latitude = 47.4979;   // helyettesíts valós adatokkal
+            float longitude = 19.0402;  // helyettesíts valós adatokkal
+            float altitude = 130.0;     // helyettesíts valós adatokkal
+
+            // Átalakítás X, Y, Z-re
+            Coordinates coords = gps_to_xyz(latitude, longitude, altitude);
+
+            // X, Y, Z küldése MQTT-n keresztül
+            char payload[100];
+            snprintf(payload, sizeof(payload), "X: %.2f, Y: %.2f, Z: %.2f", coords.x, coords.y, coords.z);
+            mqtt_publish("gps/xyz", payload);
+
+            ESP_LOGI(TAG, "GPS X: %.2f, Y: %.2f, Z: %.2f", coords.x, coords.y, coords.z);
         }
     }
 }
