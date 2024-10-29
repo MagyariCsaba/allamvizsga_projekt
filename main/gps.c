@@ -4,24 +4,19 @@
 #include <stdio.h>
 #include <string.h>
 #include "esp_log.h"
+#include "driver/uart.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
-// Föld sugara (méterben)
+#define UART_NUM UART_NUM_2  // A GPS UART porthoz beállítva
+#define BUF_SIZE 1024
 #define EARTH_RADIUS 6371000.0
 
-// Kezdőpont koordinátái, amelyhez viszonyítunk (pl. egy referencia GPS pont)
-#define REF_LAT 47.4979  // Példa Budapest középpontjára
+#define REF_LAT 47.4979
 #define REF_LON 19.0402
-
-// Koordináta-struktúra definiálása
-typedef struct {
-    float x;
-    float y;
-    float z;
-} Coordinates;
 
 static const char *TAG = "GPS";
 
-// GPS adat átalakítása X, Y, Z koordinátákra
 Coordinates gps_to_xyz(float latitude, float longitude, float altitude) {
     float lat_rad = latitude * M_PI / 180.0;
     float lon_rad = longitude * M_PI / 180.0;
@@ -40,22 +35,20 @@ Coordinates gps_to_xyz(float latitude, float longitude, float altitude) {
 }
 
 void gps_read_and_publish() {
-    if (Serial2.available()) {
-        char gps_data[100];
-        int len = Serial2.readBytesUntil('\n', gps_data, sizeof(gps_data) - 1);
-        gps_data[len] = '\0';
-
+    uint8_t* data = (uint8_t*) malloc(BUF_SIZE);
+    int len = uart_read_bytes(UART_NUM, data, BUF_SIZE - 1, 20 / portTICK_RATE_MS);
+    
+    if (len > 0) {
+        data[len] = '\0';
+        
         // Parselés ($GPGGA formátum keresése)
-        if (strstr(gps_data, "$GPGGA") != NULL) {
-            // Példa értékek (valós GPS parsolás szükséges)
+        if (strstr((char*)data, "$GPGGA") != NULL) {
             float latitude = 47.4979;   // helyettesíts valós adatokkal
             float longitude = 19.0402;  // helyettesíts valós adatokkal
             float altitude = 130.0;     // helyettesíts valós adatokkal
 
-            // Átalakítás X, Y, Z-re
             Coordinates coords = gps_to_xyz(latitude, longitude, altitude);
 
-            // X, Y, Z küldése MQTT-n keresztül
             char payload[100];
             snprintf(payload, sizeof(payload), "X: %.2f, Y: %.2f, Z: %.2f", coords.x, coords.y, coords.z);
             mqtt_publish("gps/xyz", payload);
@@ -63,4 +56,6 @@ void gps_read_and_publish() {
             ESP_LOGI(TAG, "GPS X: %.2f, Y: %.2f, Z: %.2f", coords.x, coords.y, coords.z);
         }
     }
+
+    free(data);
 }
