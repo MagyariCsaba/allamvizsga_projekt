@@ -10,6 +10,7 @@
 extern esp_mqtt_client_handle_t mqtt_client;
 extern EventGroupHandle_t s_wifi_event_group;
 
+void mqtt_publish(const char *topic, const char *data);
 void wifi_init_sta(void);
 void mqtt_app_start(void);
 void send_100_messages(esp_mqtt_client_handle_t client);

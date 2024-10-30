@@ -5,10 +5,14 @@
 #include "driver/uart.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 
 #define UART_NUM UART_NUM_2
 #define TX_PIN 17  // UART TX pin
 #define RX_PIN 16  // UART RX pin
+
+EventGroupHandle_t wifi_event_group;
+esp_mqtt_client_handle_t mqtt_client;
 
 void app_main(void)
 {
@@ -18,12 +22,13 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
-    ESP_ERROR_CHECK(ret);
+    ESP_ERROR_CHECK(nvs_flash_init());
+
+    wifi_event_group = xEventGroupCreate();  // WiFi eseménycsoport inicializálása
+    wifi_init_sta();                         // WiFi inicializálás
+    mqtt_client = mqtt_app_start();          // MQTT inicializálás
 
     ESP_LOGI("Main", "ESP_WIFI_MODE_STA");
-    wifi_init_sta();  // WiFi inicializálás
-
-    mqtt_app_start();  // MQTT inicializálás
 
     // UART konfigurálása GPS-hez
     const uart_config_t uart_config = {
@@ -35,7 +40,7 @@ void app_main(void)
     };
     uart_param_config(UART_NUM, &uart_config);
     uart_set_pin(UART_NUM, TX_PIN, RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    uart_driver_install(UART_NUM, 1024 * 2, 0, 0, NULL, 0);
+    uart_driver_install(UART_NUM, BUF_SIZE, 0, 0, NULL, 0);
 
     // GPS adat olvasása és publikálása
     while (1) {

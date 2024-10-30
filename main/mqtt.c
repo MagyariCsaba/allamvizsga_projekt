@@ -9,6 +9,7 @@
 #include "freertos/event_groups.h"
 #include "lwip/err.h"
 #include "lwip/sys.h"
+#include "mqtt_client.h"
 
 #define TAG "wifi station"
 #define MQTT_TAG "MQTT Client"
@@ -146,4 +147,35 @@ void mqtt_app_start(void)
     mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
     ESP_ERROR_CHECK(esp_mqtt_client_start(mqtt_client));
+}
+
+void gps_read_and_publish()
+{
+    uint8_t* data = (uint8_t*) malloc(BUF_SIZE);
+    int len = uart_read_bytes(UART_NUM, data, BUF_SIZE - 1, 20 / portTICK_RATE_MS);
+    
+    if (len > 0) {
+        data[len] = '\0';
+
+        if (strstr((char*)data, "$GPGGA") != NULL) {
+            float latitude = 47.4979;
+            float longitude = 19.0402;
+            float altitude = 130.0;
+
+            Coordinates coords = gps_to_xyz(latitude, longitude, altitude);
+
+            char payload[100];
+            snprintf(payload, sizeof(payload), "X: %.2f, Y: %.2f, Z: %.2f", coords.x, coords.y, coords.z);
+
+            int msg_id = esp_mqtt_client_publish(mqtt_client, "gps/xyz", payload, 0, 1, 0);
+            if (msg_id >= 0) {
+                ESP_LOGI(TAG, "MQTT Publish successful, msg_id=%d", msg_id);
+            } else {
+                ESP_LOGE(TAG, "MQTT Publish failed");
+            }
+            ESP_LOGI(TAG, "GPS X: %.2f, Y: %.2f, Z: %.2f", coords.x, coords.y, coords.z);
+        }
+    }
+
+    free(data);
 }
